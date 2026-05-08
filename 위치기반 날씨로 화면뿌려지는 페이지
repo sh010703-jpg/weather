@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>현재 위치 날씨</title>
+    <style>
+        body { font-family: 'Pretendard', sans-serif; background: #e0eafc; background: linear-gradient(to right, #cfdef3, #e0eafc); display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+        .card { background: white; padding: 2.5rem; border-radius: 20px; box-shadow: 0 15px 35px rgba(0,0,0,0.1); text-align: center; width: 320px; }
+        .temp { font-size: 3.5rem; font-weight: 800; color: #1a73e8; margin: 10px 0; }
+        .info { color: #5f6368; font-size: 1.1rem; }
+        .status { margin-bottom: 20px; font-weight: bold; color: #3c4043; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div id="status" class="status">위치 정보 확인 중...</div>
+        <div id="weather-content" style="display:none;">
+            <div id="location-name" style="color: #70757a; font-size: 0.9rem;">내 주변 위치</div>
+            <div id="temp" class="temp">--°C</div>
+            <div id="details" class="info">습도: --%</div>
+        </div>
+    </div>
+
+    <script>
+        // 1. 위경도를 기상청 격자 좌표로 변환하는 함수
+        function dfs_xy_conv(v1, v2) {
+            const RE = 6371.00877; // 지구 반지름(km)
+            const GRID = 5.0; // 격자 간격(km)
+            const SLAT1 = 30.0; // 투영 위도1(degree)
+            const SLAT2 = 60.0; // 투영 위도2(degree)
+            const OLON = 126.0; // 기준점 경도(degree)
+            const OLAT = 38.0; // 기준점 위도(degree)
+            const XO = 43; // 기준점 X좌표(GRID)
+            const YO = 136; // 기준점 Y좌표(GRID)
+
+            const DEGRAD = Math.PI / 180.0;
+            const re = RE / GRID;
+            const slat1 = SLAT1 * DEGRAD;
+            const slat2 = SLAT2 * DEGRAD;
+            const olon = OLON * DEGRAD;
+            const olat = OLAT * DEGRAD;
+
+            let sn = Math.tan(Math.PI * 0.25 + slat2 * 0.5) / Math.tan(Math.PI * 0.25 + slat1 * 0.5);
+            sn = Math.log(Math.cos(slat1) / Math.cos(slat2)) / Math.log(sn);
+            let sf = Math.tan(Math.PI * 0.25 + slat1 * 0.5);
+            sf = Math.pow(sf, sn) * Math.cos(slat1) / sn;
+            let ro = Math.tan(Math.PI * 0.25 + olat * 0.5);
+            ro = re * sf / Math.pow(ro, sn);
+            
+            let rs = {};
+            let ra = Math.tan(Math.PI * 0.25 + (v1) * DEGRAD * 0.5);
+            ra = re * sf / Math.pow(ra, sn);
+            let theta = v2 * DEGRAD - olon;
+            if (theta > Math.PI) theta -= 2.0 * Math.PI;
+            if (theta < -Math.PI) theta += 2.0 * Math.PI;
+            theta *= sn;
+            rs['x'] = Math.floor(ra * Math.sin(theta) + XO + 0.5);
+            rs['y'] = Math.floor(ro - ra * Math.cos(theta) + YO + 0.5);
+            return rs;
+        }
+
+        // 2. 현재 위치 가져오기
+        function getLocation() {
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(success, error);
+            } else {
+                document.getElementById('status').innerText = "지오로케이션을 지원하지 않는 브라우저입니다.";
+            }
+        }
+
+        async function success(position) {
+            const lat = position.coords.latitude;
+            const lon = position.coords.longitude;
+            
+            // 좌표 변환 수행
+            const grid = dfs_xy_conv(lat, lon);
+            document.getElementById('status').innerText = "날씨 정보를 불러오는 중...";
+            
+            await fetchWeather(grid.x, grid.y);
+        }
+
+        function error() {
+            document.getElementById('status').innerText = "위치 정보를 가져올 수 없습니다 (기본 위치: 서울)";
+            fetchWeather(55, 127); // 실패 시 기본 좌표(서울) 호출
+        }
+
+        // 3. 날씨 데이터 호출 및 화면 표시
+        async function fetchWeather(nx, ny) {
+            const now = new Date();
+            // 기상청 단기예보 시간에 맞춘 날짜/시간 생성 로직 (단순화 버전)
+            const baseDate = now.toISOString().slice(0, 10).replace(/-/g, "");
+            const baseTime = "0500"; // 실제 서비스 시에는 현재 시간 기준으로 계산 로직 필요
+
+            try {
+                const response = await fetch(`/api/weather?nx=${nx}&ny=${ny}&baseDate=${baseDate}&baseTime=${baseTime}`);
+                const data = await response.json();
+                
+                const items = data.response.body.items.item;
+                const temp = items.find(i => i.category === 'TMP').fcstValue;
+                const humidity = items.find(i => i.category === 'REH').fcstValue;
+
+                document.getElementById('status').style.display = 'none';
+                document.getElementById('weather-content').style.display = 'block';
+                document.getElementById('temp').innerText = `${temp}°C`;
+                document.getElementById('details').innerText = `습도: ${humidity}%`;
+            } catch (e) {
+                document.getElementById('status').innerText = "데이터 호출 실패";
+            }
+        }
+
+        getLocation();
+    </script>
+</body>
+</html>
